@@ -45,24 +45,38 @@ func main() {
 		})
 		ginRootApi.POST("/acfun-helper/options/upload", func(c *gin.Context) {
 			rawmsg := c.PostForm("options_data")
+			fmt.Print(rawmsg)
+
 			msg, err := jsonquery.Parse(strings.NewReader(rawmsg))
+			fmt.Print(msg)
+
 			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"result": 400, "info": "Invalid auth data format."})
 			}
+
 			acCookies := jsonquery.FindOne(msg, "AcCookies")
 			Cookies := acCookies.InnerText()
 			acPassToken := jsonquery.FindOne(msg, "AcPassToken")
 			PassToken := acPassToken.InnerText()
 			authInfo := Cookies + "; acPasstoken=" + PassToken
-			if _, err := session.GetSession(c); err {
+			userId := jsonquery.FindOne(msg, "LocalUserId").InnerText()
 
+			if _, err := session.GetSession(c); err {
+				status := dataSet(userId, rawmsg)
+				if status {
+					c.JSON(http.StatusOK, gin.H{"result": 0, "info": "Success Sync and We have your senssoin Info."})
+				}
 			} else {
 				if userAuth(authInfo) {
-					c.JSON(http.StatusOK, gin.H{"result": 0, "info": "Success Sync."})
+					status := dataSet(userId, rawmsg)
+					if status {
+						c.JSON(http.StatusOK, gin.H{"result": 0, "info": "Success Sync."})
+					}
 				} else {
 					c.JSON(500, gin.H{"result": 500, "info": "You should login to acfun.cn first."})
 				}
 			}
+
 		})
 	}
 

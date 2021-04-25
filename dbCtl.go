@@ -10,7 +10,7 @@ var redisDb *redis.Client
 
 func initDbClient() *redis.Client {
 	redisDb = redis.NewClient(&redis.Options{
-		Addr:     "localhost",
+		Addr:     "localhost:6379",
 		Password: "",
 		DB:       0,
 	})
@@ -40,4 +40,17 @@ func dataSet(user string, data string) bool {
 		return false
 	}
 	return true
+}
+
+func dataGet(user string) (data string, status bool) {
+	handler := initDbClient()
+	if !checkRedisServer(handler) {
+		return "", false
+	}
+	result, err := handler.Get(user).Result()
+	if err != nil {
+		log.Panic("Can't get data from redis.")
+		return "", false
+	}
+	return result, true
 }

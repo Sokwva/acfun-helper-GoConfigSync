@@ -15,7 +15,11 @@ import (
 )
 
 var ApiStatus string = "ok"
-var apiv1Version string = "0.1.415"
+var apiv1Version string = "0.1.525"
+
+type User struct {
+	LocalUserId string
+}
 
 func main() {
 	fmt.Println("Starting...")
@@ -23,7 +27,7 @@ func main() {
 	ginRoot := gin.Default()
 	keeper, keeperInit_err := dao.DefaultRedis("localhost:6379", "", 1)
 	if keeperInit_err != nil {
-		fmt.Print("Error Accured while init GinSessionManager.")
+		fmt.Print("Error Accured while init SessionManager,Maybe You need startup Redis First.")
 		return
 	}
 
@@ -61,31 +65,37 @@ func main() {
 
 			fmt.Print(authInfo, userId)
 
-			//首先要确定的问题是，第一次成功之后，然后客户端那边退出登录之后换号换配置是不是一样能同步
-			if s, err := session.GetSession(c); err {
-				result, status := dataGet(userId)
-				fmt.Print(s)
-				if status {
-					c.String(http.StatusOK, result)
-				}
-			} else {
-				if userAuth(authInfo) {
-					result, status := dataGet(userId)
-					if status {
-						c.String(http.StatusOK, result)
+			if s, senssoinModStatus := session.GetSession(c); senssoinModStatus {
+				if _, ok := s.Get("LocalUserId"); ok {
+					var sessionData User
+					if err := s.GetStruct("user", &sessionData); err == nil {
+						result, status := dataGet(userId)
+						fmt.Print(s)
+						if status {
+							c.String(http.StatusOK, result)
+							fmt.Println("use session")
+						}
 					}
 				} else {
-					c.JSON(500, gin.H{"result": 500, "info": "You should login to acfun.cn first."})
+					if userAuth(authInfo) {
+						result, status := dataGet(userId)
+						if status {
+							c.String(http.StatusOK, result)
+							fmt.Println("after userAuth")
+						}
+					} else {
+						c.JSON(500, gin.H{"result": 500, "info": "You should login to acfun.cn first."})
+					}
 				}
+			} else {
+				c.JSON(500, gin.H{"result": 500, "info": "Server Fault."})
 			}
 
 		})
 		ginRootApi.POST("/acfun-helper/options/upload", func(c *gin.Context) {
 			rawmsg := c.PostForm("options_data")
-			fmt.Print(rawmsg)
 
 			msg, err := jsonquery.Parse(strings.NewReader(rawmsg))
-			fmt.Print(msg)
 
 			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"result": 400, "info": "Invalid auth data format."})
@@ -99,35 +109,40 @@ func main() {
 
 			userId := jsonquery.FindOne(msg, "LocalUserId").InnerText()
 
-			if s, err := session.GetSession(c); err {
-				fmt.Print(s)
-				status := dataSet(userId, rawmsg)
-				if status {
-					c.JSON(http.StatusOK, gin.H{"result": 0, "info": "Success Sync and We have your senssoin Info."})
-				}
-			} else {
-				if userAuth(authInfo) {
-					status := dataSet(userId, rawmsg)
-					if status {
-						c.JSON(http.StatusOK, gin.H{"result": 0, "info": "Success Sync."})
+			if s, senssoinModStatus := session.GetSession(c); senssoinModStatus {
+				//1判断用户是否存于session中
+				if _, ok := s.Get("LocalUserId"); ok {
+					var sessionData User
+					if err := s.GetStruct("user", &sessionData); err == nil {
+						status := dataSet(userId, rawmsg)
+						if status {
+							c.JSON(http.StatusOK, gin.H{"result": 0, "info": "Success Sync and We have your senssoin Info."})
+						}
 					}
 				} else {
-					c.JSON(500, gin.H{"result": 500, "info": "You should login to acfun.cn first."})
+					//2用户UID不存在session中则用一般的验证流程并写入session
+					if userAuth(authInfo) {
+						status := dataSet(userId, rawmsg)
+						if status {
+							s.Set("LocalUserId", userId)
+							_ = s.SetStruct("user", User{LocalUserId: userId})
+							c.JSON(http.StatusOK, gin.H{"result": 0, "info": "Success Sync."})
+						}
+					} else {
+						c.JSON(500, gin.H{"result": 500, "info": "You should login to acfun.cn first."})
+					}
 				}
+			} else {
+				c.JSON(500, gin.H{"result": 500, "info": "Server Fault."})
 			}
-
 		})
-
-		// ginRootApi.POST("/acfun-helper/commentCollect/upload", func(c *gin.Context) {
-
-		// })
 	}
 
-	ginRoot.Run()
+	ginRoot.Run("localhost:5000")
 }
 
 func userAuth(auhtInfo string) bool {
-	var authUrl string = "https://api-new.app.acfun.cn/rest/app/user/hasSignedIn"
+	var authUrl string = "https://www.acfun.cn/rest/pc-direct/user/personalBasicInfo"
 	resultRaw := localGet(authUrl, auhtInfo)
 	fmt.Print(resultRaw)
 	result, err := jsonquery.Parse(strings.NewReader(resultRaw))

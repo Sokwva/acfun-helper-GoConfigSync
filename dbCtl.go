@@ -35,6 +35,7 @@ func dataSet(user string, data string) bool {
 		return false
 	}
 	err := handler.Set(user, data, 0).Err()
+	defer handler.Close()
 	if err != nil {
 		log.Panic("Write data to Redis Failed.", err)
 		return false
@@ -48,6 +49,7 @@ func dataGet(user string) (data string, status bool) {
 		return "", false
 	}
 	result, err := handler.Get(user).Result()
+	defer handler.Close()
 	if err != nil {
 		log.Panic("Can't get data from redis.")
 		return "", false

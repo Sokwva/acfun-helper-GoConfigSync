@@ -15,7 +15,7 @@ import (
 )
 
 var ApiStatus string = "ok"
-var apiv1Version string = "0.1.525"
+var apiv1Version string = "0.1.625"
 
 type User struct {
 	LocalUserId string
@@ -33,9 +33,6 @@ func main() {
 
 	ginRoot.Use(session.DefaultGinSessionManager(keeper, "localhost"))
 
-	ginRoot.GET("/", func(c *gin.Context) {
-		c.String(200, "Hi there!")
-	})
 	ginRoot.GET("/ping", func(c *gin.Context) {
 		c.String(200, "Pong!")
 	})
@@ -44,98 +41,101 @@ func main() {
 		ginRootApi.GET("/status", func(c *gin.Context) {
 			c.String(200, ApiStatus)
 		})
-		ginRootApi.GET("/versionDetail", func(c *gin.Context) {
+		ginRootApi.GET("/version", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"result": 0, "version": apiv1Version})
 		})
-		ginRootApi.POST("/acfun-helper/options/download", func(c *gin.Context) {
-			rawmsg := c.PostForm("authCookie")
-			msg, err := jsonquery.Parse(strings.NewReader(rawmsg))
+		ginRootApi.Group("/acfun-helper/options/")
+		{
+			ginRootApi.POST("/download", func(c *gin.Context) {
+				rawmsg := c.PostForm("authCookie")
+				msg, err := jsonquery.Parse(strings.NewReader(rawmsg))
 
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"result": 400, "info": "Invalid auth data format."})
-			}
+				if err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"result": 400, "info": "Invalid auth data format."})
+				}
 
-			acCookies := jsonquery.FindOne(msg, "AcCookies")
-			Cookies := acCookies.InnerText()
-			acPassToken := jsonquery.FindOne(msg, "AcPassToken")
-			PassToken := acPassToken.InnerText()
-			authInfo := Cookies + "; acPasstoken=" + PassToken
+				acCookies := jsonquery.FindOne(msg, "AcCookies")
+				Cookies := acCookies.InnerText()
+				acPassToken := jsonquery.FindOne(msg, "AcPassToken")
+				PassToken := acPassToken.InnerText()
+				authInfo := Cookies + "; acPasstoken=" + PassToken
 
-			userId := jsonquery.FindOne(msg, "LocalUserId").InnerText()
+				userId := jsonquery.FindOne(msg, "LocalUserId").InnerText()
 
-			fmt.Print(authInfo, userId)
+				fmt.Print(authInfo, userId)
 
-			if s, senssoinModStatus := session.GetSession(c); senssoinModStatus {
-				if _, ok := s.Get("LocalUserId"); ok {
-					var sessionData User
-					if err := s.GetStruct("user", &sessionData); err == nil {
-						result, status := dataGet(userId)
-						fmt.Print(s)
-						if status {
-							c.String(http.StatusOK, result)
-							fmt.Println("use session")
+				if s, senssoinModStatus := session.GetSession(c); senssoinModStatus {
+					if _, ok := s.Get("LocalUserId"); ok {
+						var sessionData User
+						if err := s.GetStruct("user", &sessionData); err == nil {
+							result, status := dataGet(userId)
+							fmt.Print(s)
+							if status {
+								c.String(http.StatusOK, result)
+								fmt.Println("use session")
+							}
+						}
+					} else {
+						if userAuth(authInfo) {
+							result, status := dataGet(userId)
+							if status {
+								c.String(http.StatusOK, result)
+								fmt.Println("after userAuth")
+							}
+						} else {
+							c.JSON(500, gin.H{"result": 500, "info": "You should login to acfun.cn first."})
 						}
 					}
 				} else {
-					if userAuth(authInfo) {
-						result, status := dataGet(userId)
-						if status {
-							c.String(http.StatusOK, result)
-							fmt.Println("after userAuth")
+					c.JSON(500, gin.H{"result": 500, "info": "Server Fault."})
+				}
+
+			})
+			ginRootApi.POST("/upload", func(c *gin.Context) {
+				rawmsg := c.PostForm("options_data")
+
+				msg, err := jsonquery.Parse(strings.NewReader(rawmsg))
+
+				if err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"result": 400, "info": "Invalid auth data format."})
+				}
+
+				acCookies := jsonquery.FindOne(msg, "AcCookies")
+				Cookies := acCookies.InnerText()
+				acPassToken := jsonquery.FindOne(msg, "AcPassToken")
+				PassToken := acPassToken.InnerText()
+				authInfo := Cookies + "; acPasstoken=" + PassToken
+
+				userId := jsonquery.FindOne(msg, "LocalUserId").InnerText()
+
+				if s, senssoinModStatus := session.GetSession(c); senssoinModStatus {
+					//1判断用户是否存于session中
+					if _, ok := s.Get("LocalUserId"); ok {
+						var sessionData User
+						if err := s.GetStruct("user", &sessionData); err == nil {
+							status := dataSet(userId, rawmsg)
+							if status {
+								c.JSON(http.StatusOK, gin.H{"result": 0, "info": "Success Sync and We have your senssoin Info."})
+							}
 						}
 					} else {
-						c.JSON(500, gin.H{"result": 500, "info": "You should login to acfun.cn first."})
-					}
-				}
-			} else {
-				c.JSON(500, gin.H{"result": 500, "info": "Server Fault."})
-			}
-
-		})
-		ginRootApi.POST("/acfun-helper/options/upload", func(c *gin.Context) {
-			rawmsg := c.PostForm("options_data")
-
-			msg, err := jsonquery.Parse(strings.NewReader(rawmsg))
-
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"result": 400, "info": "Invalid auth data format."})
-			}
-
-			acCookies := jsonquery.FindOne(msg, "AcCookies")
-			Cookies := acCookies.InnerText()
-			acPassToken := jsonquery.FindOne(msg, "AcPassToken")
-			PassToken := acPassToken.InnerText()
-			authInfo := Cookies + "; acPasstoken=" + PassToken
-
-			userId := jsonquery.FindOne(msg, "LocalUserId").InnerText()
-
-			if s, senssoinModStatus := session.GetSession(c); senssoinModStatus {
-				//1判断用户是否存于session中
-				if _, ok := s.Get("LocalUserId"); ok {
-					var sessionData User
-					if err := s.GetStruct("user", &sessionData); err == nil {
-						status := dataSet(userId, rawmsg)
-						if status {
-							c.JSON(http.StatusOK, gin.H{"result": 0, "info": "Success Sync and We have your senssoin Info."})
+						//2用户UID不存在session中则用一般的验证流程并写入session
+						if userAuth(authInfo) {
+							status := dataSet(userId, rawmsg)
+							if status {
+								s.Set("LocalUserId", userId)
+								_ = s.SetStruct("user", User{LocalUserId: userId})
+								c.JSON(http.StatusOK, gin.H{"result": 0, "info": "Success Sync."})
+							}
+						} else {
+							c.JSON(500, gin.H{"result": 500, "info": "You should login to acfun.cn first."})
 						}
 					}
 				} else {
-					//2用户UID不存在session中则用一般的验证流程并写入session
-					if userAuth(authInfo) {
-						status := dataSet(userId, rawmsg)
-						if status {
-							s.Set("LocalUserId", userId)
-							_ = s.SetStruct("user", User{LocalUserId: userId})
-							c.JSON(http.StatusOK, gin.H{"result": 0, "info": "Success Sync."})
-						}
-					} else {
-						c.JSON(500, gin.H{"result": 500, "info": "You should login to acfun.cn first."})
-					}
+					c.JSON(500, gin.H{"result": 500, "info": "Server Fault."})
 				}
-			} else {
-				c.JSON(500, gin.H{"result": 500, "info": "Server Fault."})
-			}
-		})
+			})
+		}
 	}
 
 	ginRoot.Run("localhost:5000")
